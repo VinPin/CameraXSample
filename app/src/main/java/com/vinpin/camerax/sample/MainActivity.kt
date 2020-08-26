@@ -4,6 +4,7 @@ import android.Manifest
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
 import android.widget.Toast
+import com.vinpin.camerax.sample.camera1.Camera1Activity
 import com.vinpin.camerax.sample.system.SystemCameraActivity
 import com.vinpin.livedatapermissions.LiveDataPermissions
 import com.vinpin.livedatapermissions.PermissionDeny
@@ -21,17 +22,18 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         // 申请权限
-        LiveDataPermissions(this).request(Manifest.permission.WRITE_EXTERNAL_STORAGE).observe(this) {
-            when (it) {
-                is PermissionGrant -> setClickListeners()
-                is PermissionDeny -> onBackPressed()
+        LiveDataPermissions(this).request(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            .observe(this) {
+                when (it) {
+                    is PermissionGrant -> setClickListeners()
+                    is PermissionDeny -> onBackPressed()
+                }
             }
-        }
     }
 
     private fun setClickListeners() {
         txt_system_camera.setOnClickListener { startActivity(SystemCameraActivity.newIntent(this)) }
-        txt_camera_1.setOnClickListener { }
+        txt_camera_1.setOnClickListener { startActivity(Camera1Activity.newIntent(this)) }
         txt_camera_x.setOnClickListener { }
     }
 }
