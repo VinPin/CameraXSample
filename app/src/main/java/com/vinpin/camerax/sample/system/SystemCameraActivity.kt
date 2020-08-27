@@ -13,6 +13,7 @@ import android.util.Log
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
 import com.vinpin.camerax.sample.R
+import com.vinpin.camerax.sample.utils.FileUtils
 import com.vinpin.imageloader.ImageLoader
 import com.vinpin.livedatapermissions.LiveDataPermissions
 import com.vinpin.livedatapermissions.PermissionDeny
@@ -67,7 +68,7 @@ class SystemCameraActivity : AppCompatActivity() {
         val rootPath = externalCacheDir?.path ?: Environment.getExternalStorageDirectory().path
         pictureFilePath = "$rootPath/picture/${System.currentTimeMillis()}.jpg"
         val pictureFile = File(pictureFilePath!!)
-        createOrExistFile(pictureFile)
+        FileUtils.createOrExistFile(pictureFile)
         val intent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
         val uri: Uri
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -82,24 +83,5 @@ class SystemCameraActivity : AppCompatActivity() {
         intent.putExtra(MediaStore.EXTRA_OUTPUT, uri)
         intent.putExtra("outputFormat", Bitmap.CompressFormat.JPEG.toString())
         startActivityForResult(intent, REQUEST_CODE)
-    }
-
-    private fun createOrExistFile(file: File) {
-        if (file.exists()) {
-            return
-        }
-        if (file.isDirectory) {
-            file.mkdirs()
-            return
-        }
-        val parentFile = file.parentFile
-        if (parentFile?.exists() == false) {
-            parentFile.mkdirs()
-        }
-        try {
-            file.createNewFile()
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
     }
 }

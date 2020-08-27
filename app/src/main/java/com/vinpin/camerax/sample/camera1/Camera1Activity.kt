@@ -3,19 +3,32 @@ package com.vinpin.camerax.sample.camera1
 import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.ImageFormat
+import android.graphics.Matrix
 import android.hardware.Camera
 import android.os.Bundle
+import android.os.Environment
 import android.util.Log
 import android.view.Surface
 import android.view.SurfaceHolder
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import com.vinpin.camerax.sample.R
+import com.vinpin.camerax.sample.utils.FileUtils
+import com.vinpin.imageloader.ImageLoader
 import com.vinpin.livedatapermissions.LiveDataPermissions
 import com.vinpin.livedatapermissions.PermissionDeny
 import com.vinpin.livedatapermissions.PermissionGrant
 import kotlinx.android.synthetic.main.activity_camera_1.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
 
 /**
  * author : VinPin
@@ -64,6 +77,7 @@ class Camera1Activity : AppCompatActivity() {
             } else Toast.makeText(this, "切换闪光灯失败~", Toast.LENGTH_SHORT).show()
         }
         img_flip.setOnClickListener { switchCamera() }
+        img_take_photo.setOnClickListener { takePicture() }
     }
 
     override fun onDestroy() {
@@ -165,12 +179,7 @@ class Camera1Activity : AppCompatActivity() {
     private fun isSupportFocus(parameters: Camera.Parameters, focusMode: String): Boolean {
         //获取所支持对焦模式
         val listFocus: List<String> = parameters.supportedFocusModes
-        for (element in listFocus) {
-            if (element == focusMode) {
-                return true
-            }
-        }
-        return false
+        return listFocus.contains(focusMode)
     }
 
     /**
@@ -180,9 +189,7 @@ class Camera1Activity : AppCompatActivity() {
         val cameraInfo = Camera.CameraInfo()
         for (i in 0 until Camera.getNumberOfCameras()) {
             Camera.getCameraInfo(i, cameraInfo)
-            if (cameraInfo.facing == cameraId) {
-                return true
-            }
+            if (cameraInfo.facing == cameraId) return true
         }
         return false
     }
@@ -202,10 +209,106 @@ class Camera1Activity : AppCompatActivity() {
                 //自动对焦(单次)
                 mParameters?.focusMode = Camera.Parameters.FOCUS_MODE_AUTO
             }
+            setPreviewSize(mParameters!!, surfaceView.measuredWidth, surfaceView.measuredHeight)
+            setPictureSize(mParameters!!)
             mCamera?.parameters = mParameters
         } catch (e: Exception) {
             e.printStackTrace()
             Toast.makeText(this, "设置相机具体参数失败~", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /**
+     * 设置预览界面尺寸
+     */
+    private fun setPreviewSize(parameters: Camera.Parameters, width: Int, height: Int) {
+        val supportedPictureSizes = parameters.supportedPictureSizes
+        // 注意点：supportedPictureSizes中的Camera.Size的w是大于h的。比如：1920*1080
+        if (width.toFloat() / height == 3.0f / 4) {
+            for (i in 0 until supportedPictureSizes.size) {
+                val size: Camera.Size = supportedPictureSizes[i]
+                if (size.width.toFloat() / size.height == 4.0f / 3) {
+                    try {
+                        mParameters?.setPreviewSize(size.width, size.height)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                    break
+                }
+            }
+            return
+        }
+
+        var biggestSize: Camera.Size? = null //最大分辨率
+        var fitSize: Camera.Size? = null //最合适的分辨率
+        var targetSize: Camera.Size? = null//没有屏幕分辨率就取跟屏幕分辨率相近(大)的size
+        var targetSize2: Camera.Size? = null//没有屏幕分辨率就取跟屏幕分辨率相近(小)的size
+
+        Log.i("test", ">>> SurfaceView尺寸: ${height}*${width}")
+        for (size in supportedPictureSizes) {
+            Log.i("test", ">>> 系统支持的尺寸: ${size.width}*${size.height}")
+            // 找出支持的分辨率中最大的分辨率
+            if (biggestSize == null || (size.width > biggestSize.width && size.height > biggestSize.height)) {
+                biggestSize = size
+            }
+
+            if (size.width == height && size.height == width) {
+                fitSize = size
+            } else if (size.width == height || size.height == width) {
+                if (targetSize == null) {
+                    targetSize = size
+                } else if (size.width < height || size.height < width) {
+                    targetSize2 = size
+                }
+            }
+        }
+
+        if (fitSize == null) fitSize = targetSize
+        if (fitSize == null) fitSize = targetSize2
+        if (fitSize == null) fitSize = biggestSize
+
+        Log.i("test", ">>> 最佳预览尺寸:：${fitSize!!.width}*${fitSize.height}")
+        try {
+            parameters.setPreviewSize(fitSize!!.width, fitSize.height)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    /**
+     * 设置保存图片的尺寸
+     */
+    private fun setPictureSize(parameters: Camera.Parameters) {
+        val previewSize = parameters.previewSize
+        val previewSizeScale =
+            if (previewSize != null) previewSize.width.toFloat() / previewSize.height else 0
+        val supportedPictureSizes = parameters.supportedPictureSizes
+
+        var biggestSize: Camera.Size? = null //最大分辨率
+        var fitSize: Camera.Size? = null //最合适的分辨率
+
+        for (size in supportedPictureSizes) {
+            // 找出支持的分辨率中最大的分辨率
+            if (biggestSize == null || (size.width > biggestSize.width && size.height > biggestSize.height)) {
+                biggestSize = size
+            }
+            //选出与预览界面等比的最高分辨率
+            if (size.width >= previewSize?.width!! && size.height >= previewSize?.height!!) {
+                val sizeScale: Float = size.width / size.height.toFloat()
+                if (sizeScale == previewSizeScale) {
+                    if (fitSize == null) {
+                        fitSize = size
+                    } else if (size.width >= fitSize.width && size.height >= fitSize.height) {
+                        fitSize = size
+                    }
+                }
+            }
+        }
+        if (fitSize == null) fitSize = biggestSize
+        try {
+            parameters.setPictureSize(fitSize!!.width, fitSize.height)
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 
@@ -264,6 +367,107 @@ class Camera1Activity : AppCompatActivity() {
         } catch (e: Exception) {
             e.printStackTrace()
             false
+        }
+    }
+
+    /**
+     * 点击拍照
+     */
+    private fun takePicture() {
+        mCamera?.takePicture({
+            //点击拍照时回调
+        }, { data, camera ->
+            //回调没压缩的原始数据
+        }, { data, camera ->
+            //回调图片数据，点击拍照后相机返回的照片byte数组
+            Toast.makeText(this, "拍摄成功~", Toast.LENGTH_SHORT).show()
+            //拍照后记得调用预览方法，不然会停在拍照图像的界面
+            mCamera?.startPreview()
+            //保存图片
+            savePicture(data)
+        })
+    }
+
+    /**
+     * 保存图片
+     */
+    private fun savePicture(data: ByteArray?) {
+        if (data == null) return
+        lifecycleScope.launch(Dispatchers.IO) {
+            val rootPath = externalCacheDir?.path ?: Environment.getExternalStorageDirectory().path
+            val pictureFilePath = "$rootPath/picture/${System.currentTimeMillis()}.jpg"
+            val pictureFile = File(pictureFilePath)
+            FileUtils.createOrExistFile(pictureFile)
+
+            var fos: FileOutputStream? = null
+            try {
+                fos = FileOutputStream(pictureFile)
+                //将数据写入文件
+                fos.write(data)
+            } catch (e: IOException) {
+                e.printStackTrace()
+            } finally {
+                try {
+                    fos?.close()
+                } catch (e: IOException) {
+                    e.printStackTrace()
+                }
+            }
+
+            // 旋转图片
+            rotateImageView(mCameraId, mDisplayOrientation, pictureFilePath)
+
+            withContext(Dispatchers.Main) {
+                ImageLoader.with(this@Camera1Activity).file(pictureFile).into(img_photo)
+            }
+        }
+    }
+
+    /**
+     * 旋转图片
+     */
+    private fun rotateImageView(cameraId: Int, displayOrientation: Int, path: String) {
+        val bitmap = BitmapFactory.decodeFile(path)
+        val matrix = Matrix().apply {
+            if (cameraId == Camera.CameraInfo.CAMERA_FACING_BACK) {
+                if (displayOrientation == 90) postRotate(90f)
+            } else if (cameraId == Camera.CameraInfo.CAMERA_FACING_FRONT) {
+                postRotate(270f)
+            }
+        }
+        //旋转后的Bitmap
+        val rotateBitmap =
+            Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+        var resultBitmap: Bitmap = rotateBitmap
+        if (cameraId == Camera.CameraInfo.CAMERA_FACING_FRONT) {
+            //若是前置摄像头，需要做镜面翻转
+            resultBitmap = Bitmap.createBitmap(
+                rotateBitmap,
+                0,
+                0,
+                rotateBitmap.width,
+                rotateBitmap.height,
+                Matrix().apply { postScale(-1f, 1f) },
+                true
+            )
+        }
+
+        var fos: FileOutputStream? = null
+        try {
+            fos = FileOutputStream(File(path))
+            resultBitmap.compress(Bitmap.CompressFormat.JPEG, 100, fos)
+            fos.flush()
+            bitmap.recycle()
+            rotateBitmap.recycle()
+            resultBitmap.recycle()
+        } catch (e: IOException) {
+            e.printStackTrace()
+        } finally {
+            try {
+                fos?.close()
+            } catch (e: IOException) {
+                e.printStackTrace()
+            }
         }
     }
 }
